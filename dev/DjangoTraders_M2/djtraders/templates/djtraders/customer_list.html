@@ -142,12 +142,38 @@
                 {# Loops over the "customers" queryset from the view's context. #}
                 {% for customer in customers %}
                     <tr>
-                        <td><a href="{% url 'djtraders:customer_detail' customer.customer_id %}">{{ customer.company_name }}</a></td>
-                        <td>{{ customer.contact_name }}</td>
-                        <td>{{ customer.contact_title }}</td>
-                        <td>{{ customer.city }}</td>
-                        <td>{{ customer.country }}</td>
                         <td class="text-center">
+    <a href="{% url 'djtraders:customer_detail' customer.customer_id %}"
+       title="View customer"
+       class="text-decoration-none px-2">
+        <i class="fa-solid fa-eye fa-lg dt-icon"></i>
+    </a>
+    {% if current_employee %}
+        <a href="{% url 'djtraders:customer_edit' customer.customer_id %}"
+           title="Edit customer"
+           class="text-decoration-none px-2">
+            <i class="fa-solid fa-pen fa-lg dt-icon-warning"></i>
+        </a>
+
+        {% if customer.inactive_date %}
+            <!-- Reactivate Action: A direct POST form using a seamless button icon -->
+            <form action="{% url 'djtraders:customer_reactivate' customer.customer_id %}" method="POST" style="display:inline;">
+                {% csrf_token %}
+                <button type="submit" title="Reactivate customer" style="background:none; border:none; padding:0; margin:0;" class="px-2">
+                    <i class="fa-solid fa-user-check fa-lg text-success"></i>
+                </button>
+            </form>
+        {% else %}
+            <!-- Standard Delete Link (Only shows if active) -->
+            <a href="{% url 'djtraders:customer_edit' customer.customer_id %}?confirm_delete=1"
+               title="Delete customer"
+               class="text-decoration-none px-2">
+                <i class="fa-solid fa-trash fa-lg dt-icon-danger"></i>
+            </a>
+        {% endif %}
+    {% endif %}
+</td>
+
                             <a href="{% url 'djtraders:customer_detail' customer.customer_id %}"
                                title="View customer"
                                class="text-decoration-none px-2">

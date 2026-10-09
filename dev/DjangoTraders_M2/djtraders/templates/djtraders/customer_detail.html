@@ -25,13 +25,24 @@
     <div class="navbar dt-navbar dt-navbar-accent border-bottom border-3 shadow rounded-3 my-3 px-4 py-2">
         <div class="d-flex align-items-center">
             <h1 class="h4 mb-0">
-                {{ customer.company_name }}
-                {% if customer.inactive_date %}
-                    <span class="badge dt-status-inactive">
-                        <i class="fa-solid fa-user-slash"></i> Inactive
-                    </span>
-                {% endif %}
-            </h1>
+    {{ customer.company_name }}
+    {% if customer.inactive_date %}
+        <span class="badge dt-status-inactive me-2">
+            <i class="fa-solid fa-user-slash"></i> Inactive
+        </span>
+        
+        {% if current_employee %}
+            <!-- Reactivate Button Form on Detail Page -->
+            <form action="{% url 'djtraders:customer_reactivate' customer.customer_id %}" method="POST" style="display:inline;">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-sm btn-success align-middle">
+                    <i class="fa-solid fa-user-check"></i> Reactivate Customer
+                </button>
+            </form>
+        {% endif %}
+    {% endif %}
+</h1>
+
         </div>
 
         <div class="d-flex">

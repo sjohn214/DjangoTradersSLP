@@ -16,4 +16,5 @@
     <td class="text-end">{{ line.quantity }}</td>
     <td class="text-end">{{ line.discount|floatformat:2 }}</td>
     <td class="text-end">${{ line.line_total|floatformat:2 }}</td>
+    <td class="text-center"> <form action="{% url 'djtraders:order_remove_line' line.product.product_id %}" method="POST" style="display:inline;"> {% csrf_token %} <button type="submit" class="btn btn-sm text-danger" title="Remove item" style="background:none; border:none; padding:0; margin:0;"> <i class="fa-solid fa-trash-can"></i> </button> </form> </td> 
 </tr>

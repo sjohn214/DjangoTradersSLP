@@ -74,6 +74,11 @@ product_detail_url = path(
     "products/<int:product_id>/", views.product_detail, name="product_detail"
 )
 
+product_create_url = path('products/create/', views.product_create, name='product_create')
+product_edit_url = path('products/<int:product_id>/edit/', views.product_edit, name='product_edit')
+product_delete_url = path('products/<int:product_id>/delete/', views.product_delete, name='product_delete')
+
+
 # GET/POST /djtraders/customer-login/ -> views.customer_login_view
 customer_login_url = path(
     "customer-login/", views.customer_login_view, name="customer_login"
@@ -100,6 +105,13 @@ customer_edit_url = path(
 customer_delete_url = path(
     "customers/<str:customer_id>/delete/", views.customer_delete, name="customer_delete"
 )
+
+
+# new variable: 
+customer_reactivate_url = path(
+    'customers/<str:customer_id>/reactivate/', views.customer_reactivate, name='customer_reactivate'
+) 
+
 
 # <int:employee_id> -- Employee.employee_id is an integer PK.
 employee_detail_url = path(
@@ -131,6 +143,15 @@ order_delete_url = path(
     "orders/<int:order_id>/delete/", views.order_delete, name="order_delete"
 )
 
+order_clear_cart_url = path(
+    'cart/clear/', views.order_clear_cart, name='order_clear_cart'
+)
+
+order_remove_line_url = path(
+    'cart/remove/<int:product_id>/', views.order_remove_line, name='order_remove_line'
+)
+
+
 # region [CONCEPT] why this list must be named "urlpatterns"
 # urlpatterns is the one name Django's URL resolver actually looks for in
 # this module -- it must be called exactly that (not e.g. "urls" or
@@ -148,6 +169,9 @@ urlpatterns = [
     order_detail_url,
     login_url,
     logout_url,
+    product_create_url,
+    product_edit_url,
+    product_delete_url,
     product_detail_url,
     customer_login_url,
     customer_logout_url,
@@ -155,6 +179,9 @@ urlpatterns = [
     customer_edit_url,
     employee_detail_url,
     customer_delete_url,
+    customer_reactivate_url,
+    order_clear_cart_url,
+    order_remove_line_url,
     order_create_url,
     order_build_url,
     order_add_line_url,

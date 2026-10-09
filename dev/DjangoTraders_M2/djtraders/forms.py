@@ -39,14 +39,15 @@ template for writing a new business rule elsewhere in the app.
 """
 import re
 
+
 from crispy_forms.helper import FormHelper
-from crispy_forms.layout import HTML, Column, Layout, Row
+from crispy_forms.layout import HTML, Column, Layout, Row, Submit
 from django import forms
 from django.core.exceptions import ValidationError
 
 from datetime import date, timedelta
 
-from .models import Customer, Order, OrderDetail
+from .models import Customer, Order, OrderDetail, Product
 
 # Digits, spaces, parentheses, and dashes only, 7-20 characters -- loose
 # enough to accept "(206) 555-9857" or "030-0074321", tight enough to
@@ -256,42 +257,23 @@ class OrderDetailForm(forms.ModelForm):
     clean_<field>(), since it depends on both product and quantity
     together.
     """
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # Only non-discontinued products are offered -- same reasoning
-        # as Product.search's own show_all=False default (models.py).
-        self.fields["product"].queryset = self.fields["product"].queryset.filter(
-            discontinued=0
-        )
-        self.fields["product"].empty_label = "Select a product..."
-        self.fields["product"].widget.attrs.update({"class": "form-select"})
-        # Product (models.py) has no __str__ of its own, so a plain
-        # ModelChoiceField would render each <option> as the default
-        # "Product object (5)" -- label_from_instance overrides that
-        # per-choice display text (not the value actually submitted,
-        # which is still just the product's pk) with something a
-        # student picking from this dropdown can actually read.
-        self.fields["product"].label_from_instance = (
-            lambda product: f"{product.product_name} (${product.unit_price or 0:.2f})"
-        )
-        # Browser layer (courtesy): a real HTML5 min= on the rendered
-        # <input>, blocking an obviously-bad quantity (zero or negative)
-        # before a request is even sent. Not a guarantee -- same caveat
-        # as every other pattern= attribute in this file.
-        self.fields["quantity"].widget.attrs.update({"min": 1, "class": "form-control"})
-
     class Meta:
         model = OrderDetail
-        fields = ["product", "quantity"]
+        fields = ['product', 'quantity']
 
-    def clean_quantity(self):
-        """
-        Server layer: quantity has to be a positive number.
-        """
-        quantity = self.cleaned_data.get("quantity")
-        if quantity is not None and quantity < 1:
-            raise ValidationError("Quantity must be at least 1.")
-        return quantity
+    def clean(self):
+        cleaned_data = super().clean()
+        product = cleaned_data.get('product')
+        quantity = cleaned_data.get('quantity')
+
+        if product and quantity:
+            # Check requested amount against current database inventory status
+            if quantity > product.units_in_stock:
+                raise forms.ValidationError(
+                    f"Not enough stock available. Only {product.units_in_stock} units left."
+                )
+        return cleaned_data
+
 
 
 class OrderCommitForm(forms.ModelForm):
@@ -370,3 +352,65 @@ def default_required_date():
 def default_shipped_date():
     """order_date (today, at commit) + 1 week -- see OrderCommitForm."""
     return date.today() + timedelta(weeks=1)
+
+
+class ProductEditForm(forms.ModelForm):
+    class Meta:
+        model = Product
+        # Exclude product_id if it's an auto-incrementing key, or include it if managed manually
+        fields = [
+            'product_name', 'supplier', 'category', 'quantity_per_unit', 
+            'unit_price', 'units_in_stock', 'units_on_order', 'reorder_level'
+        ]
+        labels = {
+            'product_name': 'Product Name',
+            'quantity_per_unit': 'Quantity Per Unit',
+            'unit_price': 'Unit Price ($)',
+            'units_in_stock': 'Units In Stock',
+        }
+
+    def __init__(self, *source_args, **kwargs):
+        super().__init__(*source_args, **kwargs)
+
+        self.fields['unit_price'].widget.attrs['min'] = '0.00'
+        self.fields['unit_price'].widget.attrs['step'] = '0.01'
+        self.fields['units_in_stock'].widget.attrs['min'] = '0'
+
+
+        self.helper = FormHelper()
+        self.helper.form_method = 'post'
+        
+        # Style the fields cleanly using Crispy Forms Columns
+        self.helper.layout = Layout(
+            Row(
+                Column('product_name', css_class='form-group col-md-6 mb-0'),
+                Column('category', css_class='form-group col-md-6 mb-0'),
+                css_class='form-row'
+            ),
+            Row(
+                Column('supplier', css_class='form-group col-md-6 mb-0'),
+                Column('quantity_per_unit', css_class='form-group col-md-6 mb-0'),
+                css_class='form-row'
+            ),
+            Row(
+                Column('unit_price', css_class='form-group col-md-3 mb-0'),
+                Column('units_in_stock', css_class='form-group col-md-3 mb-0'),
+                Column('units_on_order', css_class='form-group col-md-3 mb-0'),
+                Column('reorder_level', css_class='form-group col-md-3 mb-0'),
+                css_class='form-row'
+            ),
+            Submit('submit', 'Save Product', css_class='btn dt-btn-primary-product mt-3')
+        )
+
+    # --- SERVER-SIDE LAYERED VALIDATION ---
+    def clean_unit_price(self):
+        unit_price = self.cleaned_data.get('unit_price')
+        if unit_price is not None and unit_price < 0:
+            raise forms.ValidationError("Unit price cannot be negative.")
+        return unit_price
+
+    def clean_units_in_stock(self):
+        units_in_stock = self.cleaned_data.get('units_in_stock')
+        if units_in_stock is not None and units_in_stock < 0:
+            raise forms.ValidationError("Units in stock cannot be negative.")
+        return units_in_stock

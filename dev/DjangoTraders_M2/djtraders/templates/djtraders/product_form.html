@@ -1,0 +1,15 @@
+{% extends "common/base.html" %}
+{% load crispy_forms_tags %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+    <div class="card shadow-sm border-0 my-4">
+        <div class="card-header bg-dark text-white fw-bold h5 py-3">
+            <i class="fa-solid fa-box-open me-2"></i> {{ title }}
+        </div>
+        <div class="card-body p-4">
+            {% crispy form %}
+        </div>
+    </div>
+{% endblock %}

@@ -40,6 +40,9 @@ from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
 from django.utils import timezone
+from django.views.decorators.http import require_POST
+from django.core.exceptions import PermissionDenied
+
 
 from .forms import CustomerEditForm, OrderCommitForm, OrderDetailForm, default_required_date, default_shipped_date
 from .models import Category, Customer, Employee, Order, OrderDetail, Product
@@ -476,6 +479,26 @@ def customer_delete(request, customer_id):
 
     return redirect("djtraders:customer_list")
 
+from django.shortcuts import get_object_or_404, redirect
+from django.views.decorators.http import require_POST
+from django.utils import timezone
+from .models import Customer
+# Import whatever access control function customer_delete uses (e.g., user_passes_tests or custom helpers)
+
+@require_POST
+def customer_reactivate(request, customer_id):
+   
+    if _customer_edit_denied(request, customer_id):
+        raise PermissionDenied
+
+    customer = get_object_or_404(Customer, customer_id=customer_id)
+    
+    customer.inactive_date = None
+    customer.save()
+    
+    return redirect('djtraders:customer_list')
+
+
 
 def order_detail(request, order_id):
     """
@@ -765,11 +788,17 @@ def order_build(request, customer_id):
         }
     )
 
+    cart = request.session.get("cart", {})
+    lines = cart.get("lines", {})
+    cart_count = sum(lines.values())
+
+
     context = {
         "customer": customer,
         "cart_lines": cart_lines,
         "cart_total": cart_total,
         "detail_form": detail_form,
+        "cart_count": cart_count,
         "commit_form": commit_form,
     }
     return render(request, "djtraders/order_build.html", context)
@@ -841,35 +870,57 @@ def order_add_line(request, customer_id):
 
 
 def order_commit(request, customer_id):
-    """
-    Places the cart -- the one point where any of it is written to the
-    database at all. Builds one real Order (order_date set to today,
-    employee/required_date/shipped_date from OrderCommitForm, ship_*
-    copied from the customer's own current address, same as
-    order_build's own read-only display) and one real OrderDetail per
-    cart line, inside a single transaction -- either the whole order is
-    written, or, on any failure partway through, none of it is left
-    half-written behind. The session cart is only cleared after that
-    succeeds.
+    # ... your existing order access controls and setup logic ...
+    
+    if request.method == "POST":
+        commit_form = OrderCommitForm(request.POST)
+        
+        if commit_form.is_valid():
+            cart = request.session.get("cart", {})
+            lines = cart.get("lines", {})
+            
+            try:
+                # Wrap inventory adjustments inside a database transaction
+                with transaction.atomic():
+                    # Create and save the parent Order record first
+                    order = commit_form.save(commit=False)
+                    order.customer_id = customer_id
+                    order.order_date = timezone.now().date()
+                    order.save()
+                    
+                    # Iterate through each cart item to verify and decrement stock
+                    for prod_id_str, qty in lines.items():
+                        # Select with a row lock to handle concurrent buyers
+                        product = Product.objects.select_for_update().get(product_id=int(prod_id_str))
+                        
+                        # Concurrency check: Ensure inventory wasn't swept by someone else mid-session
+                        if product.units_in_stock < qty:
+                            raise form.ValidationError(
+                                f"Stock level changed! {product.product_name} only has {product.units_in_stock} units left."
+                            )
+                        
+                        # Decrement inventory counts
+                        product.units_in_stock -= qty
+                        product.save()
+                        
+                        # Create corresponding order line rows
+                        OrderDetail.objects.create(
+                            order=order,
+                            product=product,
+                            quantity=qty,
+                            unit_price=product.unit_price or 0.0,
+                            discount=0.0
+                        )
+                
+                # Clear session storage after successful submission
+                request.session["cart"] = {"customer_id": customer_id, "lines": {}}
+                return redirect('djtraders:customer_detail', customer_id=customer_id)
+                
+            except form.ValidationError as e:
+                commit_form.add_error(None, e)
+                
+    # ... return render template view context if fallback happens ...
 
-    OrderCommitForm is used unbound here (no instance=) -- it builds a
-    brand-new Order via form.save(commit=False), rather than updating an
-    existing one.
-
-    Refuses to commit when there's no open cart for this customer, or it
-    has no lines -- an order with nothing on it isn't a meaningful
-    "placed" order -- redirecting back to order_build either way, which
-    will itself (re)start an empty cart if needed. Self-service only:
-    request.session["customer_id"] must match customer_id, same as
-    order_create/order_build -- see order_build's own docstring for why
-    there is no employee-side access to someone else's session cart
-    here, unlike order_detail/order_delete's own _order_access_denied.
-    """
-    if request.session.get("customer_id") != customer_id:
-        return redirect("djtraders:customer_detail", customer_id=customer_id)
-
-    if request.method != "POST":
-        return redirect("djtraders:order_build", customer_id=customer_id)
 
     cart = request.session.get("cart")
     if not cart or cart.get("customer_id") != customer_id or not cart.get("lines"):
@@ -960,3 +1011,102 @@ def order_delete(request, order_id):
     if customer_id:
         return redirect("djtraders:customer_detail", customer_id=customer_id)
     return redirect("djtraders:home")
+
+
+from .forms import ProductEditForm
+from .models import Product
+
+def product_create(request):
+    """
+    Create a new product record. 
+    Only accessible by logged-in employees.
+    """
+    # Access Control: Enforce employee-only restriction
+    if not request.session.get("current_user"):
+        raise PermissionDenied
+
+    if request.method == "POST":
+        form = ProductEditForm(request.POST)
+        if form.is_valid():
+            form.save()
+            return redirect('djtraders:product_list')
+    else:
+        form = ProductEditForm()
+
+    return render(request, "djtraders/product_form.html", {
+        "form": form, 
+        "title": "New Product"
+    })
+
+
+def product_edit(request, product_id):
+    """
+    Edit an existing product record.
+    Only accessible by logged-in employees.
+    """
+    # Access Control: Enforce employee-only restriction
+    if not request.session.get("current_user"):
+        raise PermissionDenied
+
+    product = get_object_or_404(Product, product_id=product_id)
+
+    if request.method == "POST":
+        form = ProductEditForm(request.POST, instance=product)
+        if form.is_valid():
+            form.save()
+            return redirect('djtraders:product_list')
+    else:
+        form = ProductEditForm(instance=product)
+
+    return render(request, "djtraders/product_form.html", {
+        "form": form, 
+        "title": f"Edit {product.product_name}"
+    })
+
+
+@require_POST
+def product_delete(request, product_id):
+    """
+    Soft-delete a product by setting its 'discontinued' flag to 1.
+    Only accessible by logged-in employees.
+    """
+    # Access Control: Enforce employee-only restriction
+    if not request.session.get("current_user"):
+        raise PermissionDenied
+
+    product = get_object_or_404(Product, product_id=product_id)
+    
+    # Soft-delete requirement: flip flag and save date
+    product.discontinued = 1
+    product.date_discontinued = timezone.now().date()
+    product.save()
+
+    return redirect('djtraders:product_list')
+
+
+@require_POST
+def order_clear_cart(request):
+    """
+    Requirement 3, Enhancement 4: Reset the current session cart back to empty.
+    """
+    if "cart" in request.session and "lines" in request.session["cart"]:
+        request.session["cart"]["lines"] = {}
+        request.session.modified = True
+        
+    return redirect('djtraders:order_build')
+
+
+@require_POST
+def order_remove_line(request, product_id):
+    """
+    Requirement 3, Enhancement 1: Completely remove a product line item 
+    from the in-progress session cart dictionary.
+    """
+    if "cart" in request.session and "lines" in request.session["cart"]:
+        # Convert product_id to string since session dictionary keys are strings
+        prod_id_str = str(product_id)
+        if prod_id_str in request.session["cart"]["lines"]:
+            del request.session["cart"]["lines"][prod_id_str]
+            request.session.modified = True
+            
+    return redirect('djtraders:order_build')
